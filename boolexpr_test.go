@@ -7,9 +7,11 @@ import (
 )
 
 func ExampleParse() {
-	vars := map[string]bool{
-		"a": true,
-		"b": false,
+	vars := map[string][]bool{
+		"a": []bool{true},
+		"b": []bool{false},
+		"c": []bool{true, false},
+		"d": []bool{true, true, true},
 	}
 
 	tests := []string{
@@ -31,6 +33,19 @@ func ExampleParse() {
 		"b and (a | b)",
 		"b & (a | b)",
 		"b or (a | b)",
+		"a or b or a or b",
+		"a and not b",
+		"a and !(b)",
+		"a xor b",
+		"a^a",
+		"any c",
+		"all c",
+		"none c",
+		"not c",
+		"none a",
+		"none b",
+		"all d and any c",
+		"b xor (all c and b)",
 	}
 
 	fmt.Printf("vars = %#v\n", vars)
@@ -40,10 +55,11 @@ func ExampleParse() {
 		fmt.Println("testing:", test, "->", v, err)
 	}
 
-	_, used, _ := boolexpr.ParseWithUsed("a | a", vars)
+	used := make(map[string]bool)
+	boolexpr.ParseWithUsed("a | a", vars, used)
 	fmt.Printf("testing for used %#v\n", used)
 	// Output:
-	// vars = map[string]bool{"a":true, "b":false}
+	// vars = map[string][]bool{"a":[]bool{true}, "b":[]bool{false}, "c":[]bool{true, false}, "d":[]bool{true, true, true}}
 	// testing: a & b -> false <nil>
 	// testing: a&b -> false <nil>
 	// testing: a &b -> false <nil>
@@ -62,5 +78,17 @@ func ExampleParse() {
 	// testing: b and (a | b) -> false <nil>
 	// testing: b & (a | b) -> false <nil>
 	// testing: b or (a | b) -> true <nil>
+	// testing: a or b or a or b -> true <nil>
+	// testing: a and not b -> true <nil>
+	// testing: a and !(b) -> true <nil>
+	// testing: a xor b -> true <nil>
+	// testing: a^a -> false <nil>
+	// testing: any c -> true <nil>
+	// testing: all c -> false <nil>
+	// testing: none c -> false <nil>
+	// testing: not c -> false boolexp: multiple values for "c" with no aggregate operator
+	// testing: none a -> false <nil>
+	// testing: none b -> true <nil>
+	// testing: all d -> true <nil>
 	// testing for used map[string]bool{"a":true}
 }

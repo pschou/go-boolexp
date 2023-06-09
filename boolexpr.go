@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2023 github.com/pschou
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,17 +21,16 @@ import (
 )
 
 // A basic boolean parser which will parse a string and return the boolean result with a used variable tracker
-func ParseWithUsed(str string, vars map[string]bool) (val bool, used map[string]bool, err error) {
-	used = make(map[string]bool)
+func ParseWithUsed(str string, vars map[string][]bool, used map[string]bool) (val bool, err error) {
 	str, val, err = parseSet(str, vars, used)
 	if err == nil && strings.TrimSpace(str) != "" {
-		return val, used, fmt.Errorf("Leftover values in parse: %q", strings.TrimSpace(str))
+		return val, fmt.Errorf("Leftover values in parse: %q", strings.TrimSpace(str))
 	}
 	return
 }
 
 // A basic boolean parser which will parse a string and return the boolean result.
-func Parse(str string, vars map[string]bool) (val bool, err error) {
+func Parse(str string, vars map[string][]bool) (val bool, err error) {
 	str, val, err = parseSet(str, vars, nil)
 	if err == nil && strings.TrimSpace(str) != "" {
 		return val, fmt.Errorf("Leftover values in parse: %q", strings.TrimSpace(str))
@@ -42,32 +41,52 @@ func Parse(str string, vars map[string]bool) (val bool, err error) {
 const (
 	opOr = iota + 1
 	opAnd
+	opXor
+
+	aggAny = iota + 1
+	aggAll
 )
 
-func parseSet(s string, vars, used map[string]bool) (string, bool, error) {
-	var cur bool
+func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, bool, error) {
+	var cur, next bool
 	var err error
-	var op uint8
+	var op, agg uint8
+	var neg bool
 	for s != "" {
 		// consume the next token
 		switch s[0] {
+		case '!':
+			neg = !neg
+			s = s[1:]
+			// Drop space
+			for len(s) > 0 && s[0] == ' ' {
+				s = s[1:]
+			}
+			continue
 		case '(':
-			var result bool
-			s, result, err = parseSet(s[1:], vars, used)
+			s, next, err = parseSet(s[1:], vars, used)
 			if err != nil {
 				return "", false, err
 			}
 			if len(s) > 0 && s[0] == ')' {
 				s = s[1:]
+
+				// Flip if negative is declared
+				next = next != neg
+				neg = false
+
 				switch op & 0xf {
 				case opOr:
-					cur = cur || result
+					cur = cur || next
 					op = 0
 				case opAnd:
-					cur = cur && result
+					cur = cur && next
+					op = 0
+				case opXor:
+					cur = cur != next
 					op = 0
 				default:
-					cur = result
+					cur = next
 				}
 				continue
 			}
@@ -88,6 +107,74 @@ func parseSet(s string, vars, used map[string]bool) (string, bool, error) {
 		}
 		u := s[:i]
 		s = s[i:]
+
+		// Test for logical changers
+		switch u {
+		case "not", "NOT":
+			neg = !neg
+
+			// Drop space
+			for len(s) > 0 && s[0] == ' ' {
+				s = s[1:]
+			}
+			continue
+		case "all", "ALL":
+			agg = aggAll
+			// Drop space
+			for len(s) > 0 && s[0] == ' ' {
+				s = s[1:]
+			}
+
+			i = 0
+			for ; i < len(s); i++ {
+				c := s[i]
+				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
+					continue
+				}
+				break
+			}
+			u = s[:i]
+			s = s[i:]
+
+		case "any", "ANY":
+			agg = aggAny
+			// Drop space
+			for len(s) > 0 && s[0] == ' ' {
+				s = s[1:]
+			}
+
+			i = 0
+			for ; i < len(s); i++ {
+				c := s[i]
+				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
+					continue
+				}
+				break
+			}
+			u = s[:i]
+			s = s[i:]
+
+		case "none", "NONE":
+			agg = aggAny
+			// Drop space
+			for len(s) > 0 && s[0] == ' ' {
+				s = s[1:]
+			}
+
+			i = 0
+			for ; i < len(s); i++ {
+				c := s[i]
+				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
+					continue
+				}
+				break
+			}
+			neg = !neg
+			u = s[:i]
+			s = s[i:]
+		}
+
+		// Parse var
 		val, ok := vars[u]
 		if !ok {
 			return "", false, errors.New("boolexp: unknown variable " + quote(u) + " in expression " + quote(s))
@@ -95,17 +182,44 @@ func parseSet(s string, vars, used map[string]bool) (string, bool, error) {
 		if used != nil {
 			used[u] = true
 		}
+		switch len(val) {
+		case 0:
+			return "", false, errors.New("boolexp: variable " + quote(u) + " has no values")
+		case 1:
+			next = val[0]
+		default:
+			next = val[0]
+			switch agg {
+			case aggAll:
+				for i := 1; i < len(val); i++ {
+					next = next && val[i]
+				}
+			case aggAny:
+				for i := 1; i < len(val); i++ {
+					next = next || val[i]
+				}
+			default:
+				return "", false, errors.New("boolexp: multiple values for " + quote(u) + " with no aggregate operator")
+			}
+			agg = 0
+		}
+		// Flip if negative is declared
+		next = next != neg
+		neg = false
 
 		// Combine
 		switch op & 0xf {
 		case opOr:
-			cur = cur || val
+			cur = cur || next
 			op = 0
 		case opAnd:
-			cur = cur && val
+			cur = cur && next
+			op = 0
+		case opXor:
+			cur = cur != next
 			op = 0
 		default:
-			cur = val
+			cur = next
 		}
 		//fmt.Println("cur=", cur)
 
@@ -138,7 +252,17 @@ func parseSet(s string, vars, used map[string]bool) (string, bool, error) {
 				s = s[1:]
 			}
 			continue
+		case '^':
+			op = opXor
+			s = s[1:]
+
+			// Drop space
+			for len(s) > 0 && s[0] == ' ' {
+				s = s[1:]
+			}
+			continue
 		default:
+			i = 0
 			for ; i < len(s); i++ {
 				c := s[i]
 				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' {
@@ -161,6 +285,15 @@ func parseSet(s string, vars, used map[string]bool) (string, bool, error) {
 				continue
 			case "and", "AND":
 				op = opAnd
+				s = s[3:]
+
+				// Drop space
+				for len(s) > 0 && s[0] == ' ' {
+					s = s[1:]
+				}
+				continue
+			case "xor", "XOR":
+				op = opXor
 				s = s[3:]
 
 				// Drop space
