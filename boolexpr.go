@@ -110,7 +110,7 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 			i := 0
 			for ; i < len(s); i++ {
 				c := s[i]
-				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
+				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_' || c == '-' || c == '.' {
 					continue
 				}
 				break
