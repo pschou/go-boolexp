@@ -1,4 +1,4 @@
-# go-boolexp
+# go-boolexpr
 
 A basic boolean expression evaluator for a string and a map of boolean variables.
 

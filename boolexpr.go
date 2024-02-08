@@ -51,183 +51,199 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 	var cur, next bool
 	var err error
 	var op, agg uint8
-	var neg bool
+	var neg, has_cur bool
 	for s != "" {
-		// consume the next token
-		switch s[0] {
-		case '!':
-			neg = !neg
-			s = s[1:]
-			// Drop space
-			for len(s) > 0 && s[0] == ' ' {
+		//fmt.Println("op = ", op, "s=", s, "cur=", cur, "next=", next, "has_cur=", has_cur)
+		if has_cur {
+			has_cur = false
+		} else {
+			// consume the next token
+			switch s[0] {
+			case '!':
+				neg = !neg
 				s = s[1:]
-			}
-			continue
-		case '(':
-			s, next, err = parseSet(s[1:], vars, used)
-			if err != nil {
-				return "", false, err
-			}
-			if len(s) > 0 && s[0] == ')' {
-				s = s[1:]
-
-				// Flip if negative is declared
-				next = next != neg
-				neg = false
-
-				switch op & 0xf {
-				case opOr:
-					cur = cur || next
-					op = 0
-				case opAnd:
-					cur = cur && next
-					op = 0
-				case opXor:
-					cur = cur != next
-					op = 0
-				default:
-					cur = next
+				// Drop space
+				for len(s) > 0 && s[0] == ' ' {
+					s = s[1:]
 				}
 				continue
-			}
-			return "", false, errors.New("boolexp: no matching )")
-		}
+			case '(':
+				s, next, err = parseSet(s[1:], vars, used)
+				if err != nil {
+					return "", false, err
+				}
+				if len(s) > 0 && s[0] == ')' {
+					s = s[1:]
 
-		// Consume var.
-		i := 0
-		for ; i < len(s); i++ {
-			c := s[i]
-			if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
+					// Flip if negative is declared
+					next = next != neg
+					neg = false
+
+					switch op & 0xf {
+					case opOr:
+						cur = cur || next
+						op = 0
+					case opAnd:
+						cur = cur && next
+						op = 0
+					case opXor:
+						cur = cur != next
+						op = 0
+					default:
+						cur = next
+					}
+					if neg {
+						cur = !cur
+						neg = false
+					}
+					// Drop space
+					for len(s) > 0 && s[0] == ' ' {
+						s = s[1:]
+					}
+					has_cur = true
+					continue
+				}
+				return "", false, errors.New("boolexp: no matching )")
+			}
+
+			// Consume var.
+			i := 0
+			for ; i < len(s); i++ {
+				c := s[i]
+				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
+					continue
+				}
+				break
+			}
+			if i == 0 {
+				return "", false, errors.New("boolexp: missing variable in expression " + quote(s))
+			}
+			u := s[:i]
+			s = s[i:]
+
+			// Test for logical changers
+			switch u {
+			case "not", "NOT":
+				neg = !neg
+
+				// Drop space
+				for len(s) > 0 && s[0] == ' ' {
+					s = s[1:]
+				}
 				continue
-			}
-			break
-		}
-		if i == 0 {
-			return "", false, errors.New("boolexp: missing variable in expression " + quote(s))
-		}
-		u := s[:i]
-		s = s[i:]
-
-		// Test for logical changers
-		switch u {
-		case "not", "NOT":
-			neg = !neg
-
-			// Drop space
-			for len(s) > 0 && s[0] == ' ' {
-				s = s[1:]
-			}
-			continue
-		case "all", "ALL":
-			agg = aggAll
-			// Drop space
-			for len(s) > 0 && s[0] == ' ' {
-				s = s[1:]
-			}
-
-			i = 0
-			for ; i < len(s); i++ {
-				c := s[i]
-				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
-					continue
+			case "all", "ALL":
+				agg = aggAll
+				// Drop space
+				for len(s) > 0 && s[0] == ' ' {
+					s = s[1:]
 				}
-				break
-			}
-			u = s[:i]
-			s = s[i:]
 
-		case "any", "ANY":
-			agg = aggAny
-			// Drop space
-			for len(s) > 0 && s[0] == ' ' {
-				s = s[1:]
-			}
-
-			i = 0
-			for ; i < len(s); i++ {
-				c := s[i]
-				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
-					continue
+				i = 0
+				for ; i < len(s); i++ {
+					c := s[i]
+					if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
+						continue
+					}
+					break
 				}
-				break
-			}
-			u = s[:i]
-			s = s[i:]
+				u = s[:i]
+				s = s[i:]
 
-		case "none", "NONE":
-			agg = aggAny
-			// Drop space
-			for len(s) > 0 && s[0] == ' ' {
-				s = s[1:]
+			case "any", "ANY":
+				agg = aggAny
+				// Drop space
+				for len(s) > 0 && s[0] == ' ' {
+					s = s[1:]
+				}
+
+				i = 0
+				for ; i < len(s); i++ {
+					c := s[i]
+					if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
+						continue
+					}
+					break
+				}
+				u = s[:i]
+				s = s[i:]
+
+			case "none", "NONE":
+				agg = aggAny
+				// Drop space
+				for len(s) > 0 && s[0] == ' ' {
+					s = s[1:]
+				}
+
+				i = 0
+				for ; i < len(s); i++ {
+					c := s[i]
+					if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
+						continue
+					}
+					break
+				}
+				neg = !neg
+				u = s[:i]
+				s = s[i:]
 			}
 
-			i = 0
-			for ; i < len(s); i++ {
-				c := s[i]
-				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
-					continue
-				}
-				break
+			//fmt.Println("found var", u)
+			// Parse var
+			val, ok := vars[u]
+			if !ok {
+				return "", false, errors.New("boolexp: unknown variable " + quote(u) + " in expression " + quote(s))
 			}
-			neg = !neg
-			u = s[:i]
-			s = s[i:]
-		}
-
-		// Parse var
-		val, ok := vars[u]
-		if !ok {
-			return "", false, errors.New("boolexp: unknown variable " + quote(u) + " in expression " + quote(s))
-		}
-		if used != nil {
-			used[u] = true
-		}
-		switch len(val) {
-		case 0:
-			return "", false, errors.New("boolexp: variable " + quote(u) + " has no values")
-		case 1:
-			next = val[0]
-		default:
-			next = val[0]
-			switch agg {
-			case aggAll:
-				for i := 1; i < len(val); i++ {
-					next = next && val[i]
-				}
-			case aggAny:
-				for i := 1; i < len(val); i++ {
-					next = next || val[i]
-				}
+			if used != nil {
+				used[u] = true
+			}
+			switch len(val) {
+			case 0:
+				return "", false, errors.New("boolexp: variable " + quote(u) + " has no values")
+			case 1:
+				next = val[0]
 			default:
-				return "", false, errors.New("boolexp: multiple values for " + quote(u) + " with no aggregate operator")
+				next = val[0]
+				switch agg {
+				case aggAll:
+					for i := 1; i < len(val); i++ {
+						next = next && val[i]
+					}
+				case aggAny:
+					for i := 1; i < len(val); i++ {
+						next = next || val[i]
+					}
+				default:
+					return "", false, errors.New("boolexp: multiple values for " + quote(u) + " with no aggregate operator")
+				}
+				agg = 0
 			}
-			agg = 0
-		}
-		// Flip if negative is declared
-		next = next != neg
-		neg = false
+			// Flip if negative is declared
+			next = next != neg
+			neg = false
 
-		// Combine
-		switch op & 0xf {
-		case opOr:
-			cur = cur || next
-			op = 0
-		case opAnd:
-			cur = cur && next
-			op = 0
-		case opXor:
-			cur = cur != next
-			op = 0
-		default:
-			cur = next
+			// Combine
+			switch op & 0xf {
+			case opOr:
+				cur = cur || next
+				op = 0
+			case opAnd:
+				cur = cur && next
+				op = 0
+			case opXor:
+				cur = cur != next
+				op = 0
+			default:
+				cur = next
+			}
+			//fmt.Println("cur=", cur)
 		}
-		//fmt.Println("cur=", cur)
 
 		// Drop space
 		for len(s) > 0 && s[0] == ' ' {
 			s = s[1:]
 		}
 
+		// Return if at the end of a grouping
 		if len(s) == 0 || s[0] == ')' {
 			return s, cur, nil
 		}
@@ -262,7 +278,7 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 			}
 			continue
 		default:
-			i = 0
+			i := 0
 			for ; i < len(s); i++ {
 				c := s[i]
 				if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' {
