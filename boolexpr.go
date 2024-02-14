@@ -22,18 +22,20 @@ import (
 
 // A basic boolean parser which will parse a string and return the boolean result with a used variable tracker
 func ParseWithUsed(str string, vars map[string][]bool, used map[string]bool) (val bool, err error) {
-	str, val, err = parseSet(str, vars, used)
-	if err == nil && strings.TrimSpace(str) != "" {
-		return val, fmt.Errorf("Leftover values in parse: %q", strings.TrimSpace(str))
+	var rem []rune
+	rem, val, err = parseSet([]rune(str), vars, used)
+	if err == nil && strings.TrimSpace(string(rem)) != "" {
+		return val, fmt.Errorf("Leftover values in parse: %q", strings.TrimSpace(string(rem)))
 	}
 	return
 }
 
 // A basic boolean parser which will parse a string and return the boolean result.
 func Parse(str string, vars map[string][]bool) (val bool, err error) {
-	str, val, err = parseSet(str, vars, nil)
-	if err == nil && strings.TrimSpace(str) != "" {
-		return val, fmt.Errorf("Leftover values in parse: %q", strings.TrimSpace(str))
+	var rem []rune
+	rem, val, err = parseSet([]rune(str), vars, nil)
+	if err == nil && strings.TrimSpace(string(rem)) != "" {
+		return val, fmt.Errorf("Leftover values in parse: %q", strings.TrimSpace(string(rem)))
 	}
 	return
 }
@@ -47,12 +49,37 @@ const (
 	aggAll
 )
 
-func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, bool, error) {
+// Strip out the rest of the line on the same depth or lower
+func chomp(s []rune) (a, b []rune, err error) {
+	var paran int
+	for i, c := range s {
+		switch c {
+		case '(':
+			paran++
+		case ')':
+			paran--
+			if paran == -1 {
+				return s[:i], s[i:], nil
+			}
+		}
+	}
+	if paran == 0 {
+		return s, nil, nil
+	}
+	return nil, nil, errors.New("Mismatched ()'s")
+}
+
+func parseSet(s []rune, vars map[string][]bool, used map[string]bool) ([]rune, bool, error) {
+	// Drop space
+	for len(s) > 0 && s[0] == ' ' {
+		s = s[1:]
+	}
+
 	var cur, next bool
 	var err error
 	var op, agg uint8
 	var neg, has_cur bool
-	for s != "" {
+	for len(s) > 0 {
 		//fmt.Println("op = ", op, "s=", s, "cur=", cur, "next=", next, "has_cur=", has_cur)
 		if has_cur {
 			has_cur = false
@@ -70,7 +97,7 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 			case '(':
 				s, next, err = parseSet(s[1:], vars, used)
 				if err != nil {
-					return "", false, err
+					return nil, false, err
 				}
 				if len(s) > 0 && s[0] == ')' {
 					s = s[1:]
@@ -103,7 +130,7 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 					has_cur = true
 					continue
 				}
-				return "", false, errors.New("boolexp: no matching )")
+				return nil, false, errors.New("boolexp: no matching )")
 			}
 
 			// Consume var.
@@ -116,13 +143,13 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 				break
 			}
 			if i == 0 {
-				return "", false, errors.New("boolexp: missing variable in expression " + quote(s))
+				return nil, false, errors.New("boolexp: missing variable in expression " + quote(s))
 			}
 			u := s[:i]
 			s = s[i:]
 
 			// Test for logical changers
-			switch u {
+			switch string(u) {
 			case "not", "NOT":
 				neg = !neg
 
@@ -189,16 +216,16 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 
 			//fmt.Println("found var", u)
 			// Parse var
-			val, ok := vars[u]
+			val, ok := vars[string(u)]
 			if !ok {
-				return "", false, errors.New("boolexp: unknown variable " + quote(u) + " in expression " + quote(s))
+				return nil, false, errors.New("boolexp: unknown variable " + quote(u) + " in expression " + quote(s))
 			}
 			if used != nil {
-				used[u] = true
+				used[string(u)] = true
 			}
 			switch len(val) {
 			case 0:
-				return "", false, errors.New("boolexp: variable " + quote(u) + " has no values")
+				return nil, false, errors.New("boolexp: variable " + quote(u) + " has no values")
 			case 1:
 				next = val[0]
 			default:
@@ -213,7 +240,7 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 						next = next || val[i]
 					}
 				default:
-					return "", false, errors.New("boolexp: multiple values for " + quote(u) + " with no aggregate operator")
+					return nil, false, errors.New("boolexp: multiple values for " + quote(u) + " with no aggregate operator")
 				}
 				agg = 0
 			}
@@ -258,6 +285,22 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 			for len(s) > 0 && s[0] == ' ' {
 				s = s[1:]
 			}
+
+			if cur {
+				op = 0
+				var a []rune
+				a, s, err = chomp(s)
+				if err != nil {
+					return nil, false, err
+				}
+				if len(a) > 0 {
+					if _, _, err = parseSet(a, vars, used); err != nil {
+						return nil, false, err
+					}
+				}
+				has_cur = true
+				continue
+			}
 			continue
 		case '&':
 			op = opAnd
@@ -266,6 +309,22 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 			// Drop space
 			for len(s) > 0 && s[0] == ' ' {
 				s = s[1:]
+			}
+
+			if !cur {
+				op = 0
+				var a []rune
+				a, s, err = chomp(s)
+				if err != nil {
+					return nil, false, err
+				}
+				if len(a) > 0 {
+					if _, _, err = parseSet(a, vars, used); err != nil {
+						return nil, false, err
+					}
+				}
+				has_cur = true
+				continue
 			}
 			continue
 		case '^':
@@ -287,9 +346,9 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 				break
 			}
 			if i == 0 {
-				return "", false, errors.New("boolexp: missing logical expression " + quote(s))
+				return nil, false, errors.New("boolexp: missing logical expression " + quote(s))
 			}
-			switch s[:i] {
+			switch string(s[:i]) {
 			case "or", "OR":
 				op = opOr
 				s = s[2:]
@@ -297,6 +356,22 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 				// Drop space
 				for len(s) > 0 && s[0] == ' ' {
 					s = s[1:]
+				}
+
+				if cur {
+					op = 0
+					var a []rune
+					a, s, err = chomp(s)
+					if err != nil {
+						return nil, false, err
+					}
+					if len(a) > 0 {
+						if _, _, err = parseSet(a, vars, used); err != nil {
+							return nil, false, err
+						}
+					}
+					has_cur = true
+					continue
 				}
 				continue
 			case "and", "AND":
@@ -306,6 +381,22 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 				// Drop space
 				for len(s) > 0 && s[0] == ' ' {
 					s = s[1:]
+				}
+
+				if !cur {
+					op = 0
+					var a []rune
+					a, s, err = chomp(s)
+					if err != nil {
+						return nil, false, err
+					}
+					if len(a) > 0 {
+						if _, _, err = parseSet(a, vars, used); err != nil {
+							return nil, false, err
+						}
+					}
+					has_cur = true
+					continue
 				}
 				continue
 			case "xor", "XOR":
@@ -318,7 +409,7 @@ func parseSet(s string, vars map[string][]bool, used map[string]bool) (string, b
 				}
 				continue
 			}
-			return "", false, errors.New("boolexp: invalid logical expression " + quote(s))
+			return nil, false, errors.New("boolexp: invalid logical expression " + quote(s))
 		}
 	}
 	return s, cur, err
@@ -332,10 +423,10 @@ const (
 	runeError = '\uFFFD'
 )
 
-func quote(s string) string {
+func quote(s []rune) string {
 	buf := make([]byte, 1, len(s)+2) // slice will be at least len(s) + quotes
 	buf[0] = '"'
-	for i, c := range s {
+	for i, c := range string(s) {
 		if c >= runeSelf || c < ' ' {
 			// This means you are asking us to parse a string with unprintable or
 			// non-ASCII characters in it.  We don't expect to hit this case very
@@ -345,7 +436,7 @@ func quote(s string) string {
 			var width int
 			if c == runeError {
 				width = 1
-				if i+2 < len(s) && s[i:i+3] == string(runeError) {
+				if i+2 < len(s) && string(s[i:i+3]) == string(runeError) {
 					width = 3
 				}
 			} else {

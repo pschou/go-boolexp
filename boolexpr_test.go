@@ -33,6 +33,9 @@ func ExampleParse() {
 		"b and (a | b)",
 		"b & (a | b)",
 		"b or (a | b)",
+		"a or b and (a and b)",
+		"b or a and (a and b)",
+		"b and (a)",
 		"(a | b) & b",
 		"(a | b) or b",
 		"(a and b) & b",
@@ -41,6 +44,7 @@ func ExampleParse() {
 		"a or (a and b) or b",
 		"a and (a and b) or b",
 		"a and (a and b) ! or b",
+		"a and (a or b) and ! b",
 		"a and not b",
 		"a and !(b)",
 		"a xor b",
@@ -85,6 +89,9 @@ func ExampleParse() {
 	// testing: b and (a | b) -> false <nil>
 	// testing: b & (a | b) -> false <nil>
 	// testing: b or (a | b) -> true <nil>
+	// testing: a or b and (a and b) -> true <nil>
+	// testing: b or a and (a and b) -> false <nil>
+	// testing: b and (a) -> false <nil>
 	// testing: (a | b) & b -> false <nil>
 	// testing: (a | b) or b -> true <nil>
 	// testing: (a and b) & b -> false <nil>
@@ -93,6 +100,7 @@ func ExampleParse() {
 	// testing: a or (a and b) or b -> true <nil>
 	// testing: a and (a and b) or b -> false <nil>
 	// testing: a and (a and b) ! or b -> false boolexp: missing logical expression "! or b"
+	// testing: a and (a or b) and ! b -> true <nil>
 	// testing: a and not b -> true <nil>
 	// testing: a and !(b) -> true <nil>
 	// testing: a xor b -> true <nil>
